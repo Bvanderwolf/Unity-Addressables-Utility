@@ -1,3 +1,15 @@
+using System;
+using System.Collections;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using UnityEngine;
+using UnityEngine.AddressableAssets;
+using UnityEngine.AddressableAssets.ResourceLocators;
+using UnityEngine.ResourceManagement.AsyncOperations;
+using UnityEngine.ResourceManagement.ResourceLocations;
+using UnityEngine.ResourceManagement.ResourceProviders;
+
 public static class AddressableContent
 {
     /// <summary>
@@ -9,10 +21,10 @@ public static class AddressableContent
     {
         if (!CacheExists())
             return;
-
+        
         DownloadContentCatalog(catalogPath, callback);
     }
-
+    
     /// <summary>
     /// Downloads the remote content catalog at the given path. Use this method when you are online and
     /// always want to download the latest content catalog. Provides the loaded catalog reference.
@@ -22,7 +34,7 @@ public static class AddressableContent
     {
         if (IsContentCatalogLoaded(catalogPath))
             return;
-
+        
         AsyncOperationHandle<IResourceLocator> operation = Addressables.LoadContentCatalogAsync(catalogPath, true);
         operation.Completed += OnCompleted;
 
@@ -37,7 +49,7 @@ public static class AddressableContent
             }
             else
             {
-                callback(DataRequestResult<IResourceLocator>.CreateError($"Failed to load content catalog at path: {catalogPath}"));
+                callback(DataRequestResult<IResourceLocator>.CreateError("Failed to load content catalog"));
             }
         }
     }
@@ -81,9 +93,9 @@ public static class AddressableContent
 
         AsyncOperationHandle operation = Addressables.UpdateCatalogs(loadedCatalogs);
         operation.Completed += OnCompleted;
-
+        
         return;
-
+        
         void OnCompleted(AsyncOperationHandle handle)
         {
             if (handle.Status == AsyncOperationStatus.Succeeded)
@@ -105,11 +117,20 @@ public static class AddressableContent
     public static void GetDownloadSize(IList<IResourceLocator> catalogs, Action<DataRequestResult<long?>> callback)
     {
         IEnumerable keys = catalogs.SelectMany(catalog => catalog.Keys);
+        GetDownloadSize(keys, callback);
+    }
+    
+    /// <summary>
+    /// Retrieves the download size of the content of referenced by given keys. Use the catalog references received
+    /// by the <see cref="DownloadContentCatalog"/> method. Provides the download size in bytes.
+    /// </summary>
+    public static void GetDownloadSize(IEnumerable keys, Action<DataRequestResult<long?>> callback)
+    {
         AsyncOperationHandle<long> operation = Addressables.GetDownloadSizeAsync(keys);
         operation.Completed += OnCompleted;
-
+        
         return;
-
+        
         void OnCompleted(AsyncOperationHandle<long> handle)
         {
             if (handle.Status == AsyncOperationStatus.Succeeded)
@@ -120,7 +141,7 @@ public static class AddressableContent
             }
             else
             {
-                callback(DataRequestResult<long?>.CreateError("Failed to check content download size"));
+                callback(DataRequestResult<long?>.CreateError("Failed to check content preload"));
             }
         }
     }
@@ -133,11 +154,21 @@ public static class AddressableContent
     public static AsyncOperationHandle DownloadContent(IList<IResourceLocator> catalogs, Action<RequestResult> callback)
     {
         IEnumerable keys = catalogs.SelectMany(catalog => catalog.Keys);
+        return (DownloadContent(keys, callback));
+    }
+    
+    /// <summary>
+    /// Downloads the content referenced by the given keys. Use the catalog references received by the <see cref="DownloadContentCatalog"/>
+    /// method. Provides the download operation handle. Make sure to check the "IsDone" property of the operation handle before using
+    /// any of its other properties as this handle will be released after completion.
+    /// </summary>
+    public static AsyncOperationHandle DownloadContent(IEnumerable keys, Action<RequestResult> callback)
+    {
         AsyncOperationHandle operation = Addressables.DownloadDependenciesAsync(keys, Addressables.MergeMode.Union);
         operation.Completed += OnCompleted;
 
         return (operation);
-
+        
         void OnCompleted(AsyncOperationHandle handle)
         {
             if (handle.Status == AsyncOperationStatus.Succeeded)
@@ -148,7 +179,7 @@ public static class AddressableContent
             {
                 callback(RequestResult.CreateError("Failed to download content"));
             }
-
+            
             handle.Release();
         }
     }
@@ -166,7 +197,7 @@ public static class AddressableContent
 
         return (null);
     }
-
+    
     /// <summary>
     /// Returns whether the content catalog with the given path is loaded.
     /// </summary>
@@ -182,26 +213,6 @@ public static class AddressableContent
     }
 
     /// <summary>
-    /// Returns whether the content with the given key is loaded.
-    /// </summary>
-    public static bool IsContentInLoadedCatalog(string key)
-    {
-        foreach (IResourceLocator locator in Addressables.ResourceLocators)
-        {
-            if (locator is not ResourceLocationMap)
-                continue;
-            
-            foreach (object keyObject in locator.Keys)
-            {
-                if (keyObject.ToString() == key)
-                    return (true);
-            }
-        }
-
-        return (false);
-    }
-
-    /// <summary>
     /// Deletes cached addressable data from the device.
     /// </summary>
     public static void DeleteCacheFiles()
@@ -211,8 +222,8 @@ public static class AddressableContent
         string appDataDirectory = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
         string localLowDirectory = Path.GetFullPath(Path.Combine(appDataDirectory, "..\\LocalLow"));
         string unityDirectory = Path.Combine(localLowDirectory, "Unity", $"{companyName}_{productName}");
-        string companyDirectory = Path.Combine(localLowDirectory, companyName, productName, "com.unity.addressables");
-
+        string companyDirectory = Path.Combine(localLowDirectory, companyName, productName.ToLower(), "com.unity.addressables");
+        
         if (Directory.Exists(unityDirectory))
         {
             Directory.Delete(unityDirectory, true);
@@ -227,7 +238,7 @@ public static class AddressableContent
     }
 
     /// <summary>
-    /// Returns whether any addressable cache exists on the device.
+    /// Returns whether the addressable cache exists on the device.
     /// </summary>
     public static bool CacheExists()
     {
@@ -236,35 +247,32 @@ public static class AddressableContent
         string appDataDirectory = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
         string localLowDirectory = Path.GetFullPath(Path.Combine(appDataDirectory, "..\\LocalLow"));
         string unityDirectory = Path.Combine(localLowDirectory, "Unity", $"{companyName}_{productName}");
-        string companyDirectory = Path.Combine(localLowDirectory, companyName, productName, "com.unity.addressables");
-
+        string companyDirectory = Path.Combine(localLowDirectory, companyName, productName.ToLower(), "com.unity.addressables");
+        
         return (Directory.Exists(unityDirectory) && Directory.Exists(companyDirectory));
     }
-    
+
     /// <summary>
-    /// Returns whether cache exists for the given catalog on the device.
+    /// Returns whether cache exists for the given catalog.
     /// </summary>
-    public static bool CacheExists(ResourceLocationMap catalog)
+    public static bool CacheExists(IResourceLocator catalog)
     {
-        if (catalog.Locations.Count == 0)
-            return (false);
-        
         List<Hash128> versions = new List<Hash128>();
         List<IResourceLocation> dependencies = new List<IResourceLocation>();
-        IEnumerable<IResourceLocation> locations = catalog.Locations.SelectMany(location => location.Value);
-
+        IEnumerable<IResourceLocation> locations = ((ResourceLocationMap)catalog).Locations.SelectMany(location => location.Value);
+        
         foreach (IResourceLocation location in locations)
             if (location.HasDependencies)
                 dependencies.AddRange(location.Dependencies);
-
+        
         foreach (IResourceLocation dependency in dependencies)
         {
             if (dependency.Data == null)
                 return (false);
-    
+            
             AssetBundleRequestOptions options = (AssetBundleRequestOptions)dependency.Data;
             string bundleName = options.BundleName;
-    
+            
             versions.Clear();
             Caching.GetCachedVersions(bundleName, versions);
 
